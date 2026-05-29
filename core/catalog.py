@@ -127,6 +127,26 @@ class Catalog:
         with self._conn() as conn:
             conn.execute("DELETE FROM samples WHERE file_path=?", (file_path,))
 
+    def delete_by_folder(self, folder_path: str) -> tuple[int, list[str]]:
+        """Delete all samples under folder_path. Returns (count, embedding_ids)."""
+        import os
+        prefix = os.path.normpath(folder_path) + os.sep
+        escaped = self._escape_like(prefix)
+        bs = chr(92)
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT embedding_id FROM samples WHERE REPLACE(file_path, '/', ?) "
+                "LIKE ? ESCAPE '!' AND embedding_id IS NOT NULL",
+                (bs, f"{escaped}%"),
+            ).fetchall()
+            eids = [r["embedding_id"] for r in rows if r["embedding_id"]]
+            cur = conn.execute(
+                "DELETE FROM samples WHERE REPLACE(file_path, '/', ?) "
+                "LIKE ? ESCAPE '!'",
+                (bs, f"{escaped}%"),
+            )
+            return cur.rowcount, eids
+
     # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------

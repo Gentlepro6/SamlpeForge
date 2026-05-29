@@ -158,6 +158,7 @@ class MainWindow(QMainWindow):
         self.library.sample_play_requested.connect(self._on_play_sample)
         self.library.samples_delete_requested.connect(self._on_delete_samples)
         self.library.folder_selected.connect(self._on_folder_selected)
+        self.library.folder_remove_requested.connect(self._on_remove_folder)
         self.library._subdir_provider = self.catalog.get_immediate_subdirs
         self.library.waveform_delegate._catalog = self.catalog
         self.metadata_panel.sample_selected.connect(self._on_play_sample)
@@ -473,6 +474,23 @@ class MainWindow(QMainWindow):
         self.library.load_samples(self.catalog.get_all())
         self._update_count()
         self.status.showMessage(f"Removed {len(paths)} sample(s) from catalog")
+
+    @Slot(str)
+    def _on_remove_folder(self, folder_path: str):
+        count, embedding_ids = self.catalog.delete_by_folder(folder_path)
+        for eid in embedding_ids:
+            self.vector_store.delete(eid)
+        # Remove from saved folders
+        folders = self._load_scan_folders()
+        folders = [f for f in folders if f != folder_path]
+        self._save_scan_folders(folders)
+        # Rebuild tree without this folder
+        self.library.set_folders(folders)
+        self.library.load_samples(self.catalog.get_all())
+        self._update_count()
+        self.status.showMessage(
+            f"Removed folder and {count} sample(s) from catalog"
+        )
 
     # ------------------------------------------------------------------
     # Export
