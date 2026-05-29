@@ -139,7 +139,8 @@ class LibraryView(QWidget):
     folder_selected = Signal(str)       # folder path
     folder_remove_requested = Signal(str)  # folder path to remove
 
-    FOLDER_ROLE = Qt.UserRole + 1  # stores the full folder path for added folders
+    FOLDER_ROLE = Qt.UserRole + 1  # stores the full folder path
+    ADDED_FOLDER_ROLE = Qt.UserRole + 3  # flag: 1 if this node is an added folder
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -311,10 +312,11 @@ class LibraryView(QWidget):
                     child.setData(0, self.FOLDER_ROLE, accumulated)
                 parent = child
 
-            # Bold the added folder node
+            # Bold the added folder node + mark as removable
             font = parent.font(0)
             font.setBold(True)
             parent.setFont(0, font)
+            parent.setData(0, self.ADDED_FOLDER_ROLE, 1)
 
             # Add placeholder child so expand arrow appears (lazy loading)
             self._add_placeholder(parent)
@@ -354,12 +356,10 @@ class LibraryView(QWidget):
     def _on_folder_context_menu(self, item):
         if not item:
             return
+        if item.data(0, self.ADDED_FOLDER_ROLE) != 1:
+            return
         path = item.data(0, self.FOLDER_ROLE) or ""
         if not path:
-            return
-        # Normalize path separators for comparison (tree uses \, JSON may use /)
-        path_norm = str(Path(path))
-        if not any(Path(f) == Path(path_norm) for f in self._added_folders):
             return
         menu = QMenu(self)
         action = QAction("Remove Folder from Library", self)
