@@ -1,5 +1,5 @@
 """
-2D Constellation Map — UMAP projection of CLAP embeddings.
+2D Constellation Map — UMAP projection of GLAP embeddings.
 Each point is a sample; similar sounds cluster together.
 Interactive: hover for name, click to select.
 """
@@ -35,7 +35,7 @@ CATEGORY_COLORS = {
     "Loop":      "#14b8a6",
     "Percussion":"#fb923c",
 }
-DEFAULT_COLOR = "#7c3aed"
+DEFAULT_COLOR = "#999999"
 
 
 class ConstellationMap(QWidget):

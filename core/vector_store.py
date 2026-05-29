@@ -1,4 +1,4 @@
-"""ChromaDB wrapper for storing and querying CLAP audio embeddings locally."""
+"""ChromaDB wrapper for storing and querying GLAP audio embeddings locally."""
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional

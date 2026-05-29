@@ -1,4 +1,4 @@
-"""Search bar supporting both text-filter and semantic (CLAP) search."""
+"""Search bar supporting both text-filter and semantic (GLAP) search."""
 import logging
 from typing import Callable
 
@@ -14,7 +14,7 @@ class SearchBar(QWidget):
     """
     Emits two kinds of searches:
       - text_search(query)     → simple SQLite LIKE filter
-      - semantic_search(query) → CLAP text-embedding query
+      - semantic_search(query) → GLAP text-embedding query
     """
 
     text_search = Signal(str)
@@ -41,6 +41,14 @@ class SearchBar(QWidget):
         self.mode.setFixedWidth(130)
         self.mode.setToolTip("Search mode")
 
+        # Scope selector
+        self.scope_combo = QComboBox()
+        self.scope_combo.addItem("All", "all")
+        self.scope_combo.addItem("Current Folder", "folder")
+        self.scope_combo.addItem("Current Disk", "disk")
+        self.scope_combo.setFixedWidth(120)
+        self.scope_combo.setToolTip("Search scope")
+
         # Input
         self.input = QLineEdit()
         self.input.setPlaceholderText('Search… (e.g. "dark cinematic sub bass")')
@@ -58,6 +66,7 @@ class SearchBar(QWidget):
 
         lay.addWidget(QLabel("🔍"))
         lay.addWidget(self.mode)
+        lay.addWidget(self.scope_combo)
         lay.addWidget(self.input, 1)
         lay.addWidget(self.btn)
         lay.addWidget(self.lbl_status)
@@ -100,6 +109,9 @@ class SearchBar(QWidget):
         elif mode == "semantic":
             self.set_status("Searching…")
             self.semantic_search.emit(query)
+
+    def scope(self) -> str:
+        return self.scope_combo.currentData()
 
     def set_status(self, msg: str):
         self.lbl_status.setText(msg)

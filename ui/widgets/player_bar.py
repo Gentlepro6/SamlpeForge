@@ -50,11 +50,11 @@ class PlayerBar(QWidget):
         self.btn_play.setToolTip("Play / Pause")
 
         self.lbl_pos = QLabel("00:00")
-        self.lbl_pos.setStyleSheet("color:#888; font-variant-numeric: tabular-nums;")
+        self.lbl_pos.setStyleSheet("color:#888; font-family: \"Consolas\", \"Courier New\", monospace;")
         self.lbl_pos.setFixedWidth(40)
 
         self.lbl_dur = QLabel("00:00")
-        self.lbl_dur.setStyleSheet("color:#555; font-variant-numeric: tabular-nums;")
+        self.lbl_dur.setStyleSheet("color:#555; font-family: \"Consolas\", \"Courier New\", monospace;")
         self.lbl_dur.setFixedWidth(40)
 
         self.lbl_name = QLabel("No sample loaded")

@@ -1,7 +1,7 @@
 """
 Audio analysis pipeline:
-  1. Load audio (librosa, resampled to 48 kHz for CLAP)
-  2. Extract CLAP embedding (512-dim)
+  1. Load audio (librosa, resampled to 16 kHz for GLAP)
+  2. Extract GLAP embedding (multilingual, supports Chinese)
   3. Extract DSP features via librosa (BPM, key, loudness, spectral centroid)
   4. Store embedding in ChromaDB, features in SQLite catalog
 """
@@ -11,8 +11,6 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import warnings
-
 import librosa
 import numpy as np
 from PySide6.QtCore import QObject, QThread, Signal
@@ -20,7 +18,8 @@ from PySide6.QtCore import QObject, QThread, Signal
 from config import (
     ANALYSIS_SAMPLE_RATE,
     BATCH_SIZE,
-    CLAP_MODEL_ID,
+    GLAP_MODEL_ID,
+    WAVEFORM_PEAKS_COUNT,
     WORKER_THREADS,
 )
 from core.catalog import Catalog
@@ -29,35 +28,32 @@ from core.vector_store import VectorStore
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Lazy model loader — weights download once to ~/.cache/huggingface
+# Lazy model loader — GLAP (multilingual, supports Chinese + 8 languages)
 # ---------------------------------------------------------------------------
-_clap_model = None
-_clap_processor = None
+_glap_model = None
 
 
-def _load_clap():
-    global _clap_model, _clap_processor
-    if _clap_model is None:
-        from transformers import ClapModel, ClapProcessor
+def _load_glap():
+    global _glap_model
+    if _glap_model is None:
         import torch
+        from transformers import AutoModel
 
-        log.info("Loading CLAP model %s …", CLAP_MODEL_ID)
-        _clap_processor = ClapProcessor.from_pretrained(CLAP_MODEL_ID)
-        _clap_model = ClapModel.from_pretrained(CLAP_MODEL_ID)
+        log.info("Loading GLAP model %s …", GLAP_MODEL_ID)
+        _glap_model = AutoModel.from_pretrained(
+            GLAP_MODEL_ID, trust_remote_code=True, local_files_only=False,
+        ).eval()
 
-        # Move to best available device
         if _try_mps():
-            _clap_model = _clap_model.to("mps")
-            log.info("CLAP running on Apple MPS")
+            _glap_model = _glap_model.to("mps")
+            log.info("GLAP running on Apple MPS")
         elif _try_cuda():
-            _clap_model = _clap_model.to("cuda")
-            log.info("CLAP running on CUDA")
+            _glap_model = _glap_model.to("cuda")
+            log.info("GLAP running on CUDA")
         else:
-            log.info("CLAP running on CPU")
+            log.info("GLAP running on CPU")
 
-        _clap_model.eval()
-
-    return _clap_model, _clap_processor
+    return _glap_model
 
 
 def _try_mps() -> bool:
@@ -127,8 +123,8 @@ def extract_dsp_features(audio: np.ndarray, sr: int) -> Dict:
 MIN_DURATION_SEC = 0.5   # descartar samples menores a 0.5s
 
 
-def analyse_file(file_path: str, model, processor) -> Optional[Dict]:
-    """Full analysis: load audio → DSP → CLAP embedding. Returns feature dict."""
+def analyse_file(file_path: str, model) -> Optional[Dict]:
+    """Full analysis: load audio → DSP → GLAP embedding. Returns feature dict."""
     import torch
 
     try:
@@ -137,61 +133,46 @@ def analyse_file(file_path: str, model, processor) -> Optional[Dict]:
         log.warning("Cannot load %s: %s", file_path, exc)
         return None
 
-    # Descartar archivos demasiado cortos (test files, samples rotos)
     if len(audio) < int(MIN_DURATION_SEC * ANALYSIS_SAMPLE_RATE):
         log.debug("Skipping too-short file (%d samples): %s", len(audio), file_path)
         return None
 
+    # Waveform peaks (200 points for table thumbnail)
+    step = max(1, len(audio) // WAVEFORM_PEAKS_COUNT)
+    peaks = np.array(
+        [audio[i:i+step].max() for i in range(0, len(audio)-step, step)],
+        dtype=np.float32,
+    )
+
     # DSP features
     dsp = extract_dsp_features(audio, ANALYSIS_SAMPLE_RATE)
 
-    # CLAP embedding
+    # GLAP embedding
     try:
         device = next(model.parameters()).device
-        inputs = processor(
-            audio=audio,                   # 'audios' estaba deprecado → 'audio'
-            sampling_rate=ANALYSIS_SAMPLE_RATE,
-            return_tensors="pt",
-        )
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+        audio_tensor = torch.from_numpy(audio).unsqueeze(0).to(device)
         with torch.no_grad():
-            embedding = model.get_audio_features(**inputs)
-
-        # Compatibilidad: versiones nuevas de transformers devuelven
-        # BaseModelOutputWithPooling en lugar de un tensor directo
-        if hasattr(embedding, "pooler_output"):
-            embedding = embedding.pooler_output
-        elif hasattr(embedding, "last_hidden_state"):
-            embedding = embedding.last_hidden_state[:, 0, :]
-
+            embedding = model.encode_audio(audio_tensor)
         embedding_np = embedding.squeeze().cpu().numpy().tolist()
     except Exception as exc:
-        log.warning("CLAP failed for %s: %s", file_path, exc)
+        log.warning("GLAP embedding failed for %s: %s", file_path, exc)
         return None
 
     return {
         "embedding": embedding_np,
         "embedding_id": _make_embedding_id(file_path),
+        "waveform_peaks": peaks,
         **dsp,
     }
 
 
 def get_text_embedding(text: str) -> Optional[List[float]]:
-    """Return a 512-dim CLAP text embedding for semantic search."""
+    """Return a GLAP text embedding for multilingual semantic search."""
     import torch
     try:
-        model, processor = _load_clap()
-        device = next(model.parameters()).device
-        inputs = processor(text=[text], return_tensors="pt")
-        inputs = {k: v.to(device) for k, v in inputs.items()}
+        model = _load_glap()
         with torch.no_grad():
-            emb = model.get_text_features(**inputs)
-
-        if hasattr(emb, "pooler_output"):
-            emb = emb.pooler_output
-        elif hasattr(emb, "last_hidden_state"):
-            emb = emb.last_hidden_state[:, 0, :]
-
+            emb = model.encode_text([text])
         return emb.squeeze().cpu().numpy().tolist()
     except Exception as exc:
         log.error("Text embedding failed: %s", exc)
@@ -222,7 +203,7 @@ class AnalysisWorker(QObject):
     def run(self):
         try:
             # Load model once
-            model, processor = _load_clap()
+            model = _load_glap()
 
             all_samples = self.catalog.get_all()
             pending = [s for s in all_samples if s.get("analyzed_at") is None]
@@ -234,7 +215,7 @@ class AnalysisWorker(QObject):
                     break
 
                 fp = sample["file_path"]
-                result = analyse_file(fp, model, processor)
+                result = analyse_file(fp, model)
                 if result:
                     embedding = result.pop("embedding")
                     emb_id = result["embedding_id"]
@@ -256,4 +237,36 @@ class AnalysisWorker(QObject):
 
         except Exception as exc:
             log.exception("Analysis worker error")
+            self.error.emit(str(exc))
+
+
+class SemanticSearchWorker(QObject):
+    """Runs GLAP text embedding + vector search in background thread."""
+
+    results_ready = Signal(list)    # list of {id, distance, file_path}
+    error = Signal(str)
+
+    def __init__(self, query: str, vector_store: VectorStore):
+        super().__init__()
+        self.query = query
+        self.vector_store = vector_store
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def run(self):
+        try:
+            embedding = get_text_embedding(self.query)
+            if self._stop:
+                return
+            if not embedding:
+                self.error.emit("Failed to generate text embedding.")
+                return
+            similar = self.vector_store.find_by_text(embedding)
+            if self._stop:
+                return
+            self.results_ready.emit(similar or [])
+        except Exception as exc:
+            log.exception("Semantic search error")
             self.error.emit(str(exc))

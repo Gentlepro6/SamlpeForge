@@ -13,8 +13,8 @@ class WaveformView(QWidget):
         self._peaks: np.ndarray = np.array([])
         self._position: float = 0.0   # 0.0 – 1.0
         self._duration: float = 0.0
-        self.setMinimumHeight(80)
-        self.setMaximumHeight(120)
+        self.setMinimumHeight(100)
+        self.setMaximumHeight(180)
         self.setCursor(Qt.PointingHandCursor)
 
     def set_peaks(self, peaks: np.ndarray):
@@ -55,9 +55,9 @@ class WaveformView(QWidget):
 
         # Waveform gradient fill
         grad = QLinearGradient(0, 0, 0, h)
-        grad.setColorAt(0.0, QColor("#5b21b6"))
-        grad.setColorAt(0.5, QColor("#7c3aed"))
-        grad.setColorAt(1.0, QColor("#5b21b6"))
+        grad.setColorAt(0.0, QColor("#6e6e6e"))
+        grad.setColorAt(0.5, QColor("#999999"))
+        grad.setColorAt(1.0, QColor("#6e6e6e"))
 
         playhead_x = int(self._position * w)
 
@@ -71,9 +71,9 @@ class WaveformView(QWidget):
             is_played = x <= playhead_x
 
             if is_played:
-                color = QColor("#7c3aed")
+                color = QColor("#999999")
             else:
-                color = QColor("#3b2070")
+                color = QColor("#505050")
 
             painter.fillRect(x, mid - bar_h, bar_w, bar_h * 2, color)
 

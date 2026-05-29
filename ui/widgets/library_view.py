@@ -1,26 +1,29 @@
 """
-Library panel: folder tree (left) + sample table (right).
-Supports drag-and-drop to DAW and double-click to play.
+Library panel: scan-folder list (left) + sample table (right).
+Supports drag-and-drop to DAW, double-click to play, and right-click to delete.
 """
 import logging
-import os
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import (
     QAbstractTableModel, QMimeData, QModelIndex, QSortFilterProxyModel,
     Qt, Signal, QUrl,
 )
-from PySide6.QtGui import QColor, QDrag
+from PySide6.QtGui import QAction, QColor, QDrag
 from PySide6.QtWidgets import (
-    QAbstractItemView, QFileSystemModel, QFrame, QHBoxLayout,
-    QHeaderView, QSplitter, QTableView, QTreeView, QVBoxLayout, QWidget,
+    QAbstractItemView, QFrame, QHBoxLayout, QHeaderView,
+    QMenu, QSplitter, QTableView, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
+
+from ui.widgets.waveform_delegate import WaveformDelegate
 
 log = logging.getLogger(__name__)
 
-COLUMNS = ["Name", "Format", "Duration", "BPM", "Key", "SR", "Loudness", "Category", "Tags"]
+COLUMNS = ["Name", "Format", "Duration", "BPM", "Key", "SR", "Loudness", "Category", "Tags", "Waveform"]
 COL_IDX = {c: i for i, c in enumerate(COLUMNS)}
+
+WaveformRole = Qt.UserRole + 2
 
 
 class SampleTableModel(QAbstractTableModel):
@@ -61,6 +64,8 @@ class SampleTableModel(QAbstractTableModel):
             return self._format_cell(row, col)
         if role == Qt.UserRole:
             return row.get("file_path", "")
+        if role == WaveformRole:
+            return row.get("waveform_peaks")
         if role == Qt.ForegroundRole:
             if row.get("analyzed_at") is None:
                 return QColor("#555555")
@@ -117,13 +122,19 @@ class SampleTableModel(QAbstractTableModel):
 
 
 class LibraryView(QWidget):
-    """Folder browser + sample list with signals for selection and play."""
+    """Scan-folder tree + sample table with signals for selection and play."""
 
     sample_selected = Signal(dict)       # full metadata row
     sample_play_requested = Signal(str)  # file_path
+    samples_delete_requested = Signal(list)  # list of file_paths
+    folder_selected = Signal(str)       # folder path
+
+    FOLDER_ROLE = Qt.UserRole + 1  # stores the full folder path for added folders
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._added_folders: set[str] = set()
+        self._subdir_provider: Callable[[str], list[str]] = lambda p: []
         self._build_ui()
 
     def _build_ui(self):
@@ -134,21 +145,21 @@ class LibraryView(QWidget):
         splitter = QSplitter(Qt.Horizontal)
 
         # ── Folder Tree ──────────────────────────────────────────────
-        self._fs_model = QFileSystemModel()
-        self._fs_model.setRootPath("")
-        self._fs_model.setNameFilters(["*"])
-        self._fs_model.setNameFilterDisables(False)
-
-        self.folder_tree = QTreeView()
-        self.folder_tree.setModel(self._fs_model)
-        self.folder_tree.setRootIndex(self._fs_model.index(str(Path.home())))
-        self.folder_tree.setMinimumWidth(180)
-        self.folder_tree.setMaximumWidth(280)
-        # Hide size, type, date columns
-        for col in (1, 2, 3):
-            self.folder_tree.hideColumn(col)
+        self.folder_tree = QTreeWidget()
         self.folder_tree.setHeaderHidden(True)
-        self.folder_tree.clicked.connect(self._on_folder_clicked)
+        self.folder_tree.setMinimumWidth(200)
+        self.folder_tree.setMaximumWidth(320)
+        self.folder_tree.setIndentation(16)
+        self.folder_tree.setRootIsDecorated(True)
+        self.folder_tree.setAnimated(True)
+        self.folder_tree.itemClicked.connect(self._on_folder_item_clicked)
+        self.folder_tree.itemExpanded.connect(self._on_item_expanded)
+        # "All Samples" root item
+        self._all_item = QTreeWidgetItem(self.folder_tree, ["All Samples"])
+        self._all_item.setData(0, self.FOLDER_ROLE, "")
+        font = self._all_item.font(0)
+        font.setBold(True)
+        self._all_item.setFont(0, font)
 
         # ── Sample Table ─────────────────────────────────────────────
         self._model = SampleTableModel()
@@ -165,19 +176,25 @@ class LibraryView(QWidget):
         self.table.setSortingEnabled(True)
         self.table.setShowGrid(False)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(24)
+        self.table.verticalHeader().setDefaultSectionSize(48)
         self.table.horizontalHeader().setStretchLastSection(True)
 
         # Column widths
-        widths = [200, 60, 60, 60, 50, 50, 70, 100, 150]
+        widths = [200, 60, 60, 60, 50, 50, 70, 100, 150, 180]
         for i, w in enumerate(widths):
             self.table.setColumnWidth(i, w)
+
+        # Waveform delegate (catalog wired later from MainWindow)
+        self.waveform_delegate = WaveformDelegate()
+        self.table.setItemDelegateForColumn(COL_IDX["Waveform"], self.waveform_delegate)
 
         # Drag from table
         self.table.setDragEnabled(True)
         self.table.setDragDropMode(QAbstractItemView.DragOnly)
         self.table.setDefaultDropAction(Qt.CopyAction)
 
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._on_context_menu)
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self.table.doubleClicked.connect(self._on_double_click)
 
@@ -196,6 +213,7 @@ class LibraryView(QWidget):
         self._model.append_rows(samples)
 
     def filter_text(self, text: str):
+        self._proxy.setFilterRole(Qt.DisplayRole)
         self._proxy.setFilterFixedString(text)
 
     def selected_row(self) -> Optional[Dict]:
@@ -205,23 +223,133 @@ class LibraryView(QWidget):
         src = self._proxy.mapToSource(idxs[0])
         return self._model.get_row(src.row())
 
-    # ------------------------------------------------------------------
-    def _on_folder_clicked(self, index):
-        path = self._fs_model.filePath(index)
-        # Emit to parent to trigger folder-scoped filter
-        # (handled by MainWindow by calling filter_folder)
-        self.filter_folder(path)
+    def selected_paths(self) -> List[str]:
+        """Return file_paths of all selected rows."""
+        paths = []
+        for idx in self.table.selectionModel().selectedRows():
+            src = self._proxy.mapToSource(idx)
+            row = self._model.get_row(src.row())
+            if row:
+                paths.append(row["file_path"])
+        return paths
 
-    def filter_folder(self, folder_path: str):
-        """Show only samples inside folder_path."""
-        self._proxy.setFilterRole(Qt.UserRole)
-        # Custom: filter by file_path prefix
-        self._proxy.setFilterFixedString("")
-        # Use a regex on the full path (UserRole)
-        import re
-        escaped = re.escape(folder_path)
-        self._proxy.setFilterRegularExpression(escaped)
-        self._proxy.setFilterRole(Qt.ToolTipRole)
+    # ------------------------------------------------------------------
+    # Folder tree management
+    # ------------------------------------------------------------------
+    def _path_parts(self, path: str) -> list[str]:
+        """Split a path into hierarchy parts, e.g. C:/Users/me/audio → ['C:', 'Users', 'me', 'audio']"""
+        p = Path(path)
+        parts = []
+        # Drive or root
+        if p.drive:
+            parts.append(p.drive.rstrip(":"))
+        elif p.anchor:
+            parts.append(p.anchor.rstrip("/\\"))
+        for part in p.parts[len(Path(p.anchor).parts):]:
+            if part:
+                parts.append(part)
+        return parts
+
+    def add_folder(self, folder_path: str):
+        if folder_path in self._added_folders:
+            return
+        self._added_folders.add(folder_path)
+        self._rebuild_folder_tree()
+
+    def set_folders(self, paths: list[str]):
+        self._added_folders = set(paths)
+        self._rebuild_folder_tree()
+
+    def folders(self) -> list[str]:
+        return list(self._added_folders)
+
+    def _rebuild_folder_tree(self):
+        """Rebuild the tree from _added_folders, showing full path hierarchy
+        including subdirectories from the catalog."""
+        while self._all_item.childCount():
+            self._all_item.removeChild(self._all_item.child(0))
+
+        if not self._added_folders:
+            self.folder_tree.expandAll()
+            log.debug("Folder tree: no folders to show")
+            return
+
+        sorted_folders = sorted(self._added_folders, key=lambda p: p.lower())
+        log.debug("Building folder tree for: %s", sorted_folders)
+
+        for folder in sorted_folders:
+            parts = self._path_parts(folder)
+            if not parts:
+                continue
+
+            parent = self._all_item
+            accumulated = ""
+            for i, part in enumerate(parts):
+                if i == 0:
+                    accumulated = part + ":\\" if ":" not in part else part
+                else:
+                    accumulated = str(Path(accumulated) / part)
+
+                child = None
+                for j in range(parent.childCount()):
+                    if parent.child(j).text(0) == part:
+                        child = parent.child(j)
+                        break
+                if child is None:
+                    child = QTreeWidgetItem(parent, [part])
+                    child.setData(0, self.FOLDER_ROLE, accumulated)
+                parent = child
+
+            # Bold the added folder node
+            font = parent.font(0)
+            font.setBold(True)
+            parent.setFont(0, font)
+
+            # Add placeholder child so expand arrow appears (lazy loading)
+            self._add_placeholder(parent)
+
+        self._all_item.setExpanded(True)  # show drives / top-level folders
+        log.debug("Folder tree built with %d folders", len(self._added_folders))
+
+    @staticmethod
+    def _add_placeholder(parent_item: QTreeWidgetItem):
+        """Add a dummy child so Qt shows the expand arrow."""
+        if parent_item.childCount() == 0:
+            dummy = QTreeWidgetItem(parent_item, ["..."])
+            dummy.setData(0, Qt.UserRole + 1, "__placeholder__")
+
+    def _on_item_expanded(self, item: QTreeWidgetItem):
+        """Lazy-load subdirectories when user expands a node."""
+        # Remove placeholder if present
+        if item.childCount() == 1 and item.child(0).data(0, Qt.UserRole + 1) == "__placeholder__":
+            item.removeChild(item.child(0))
+
+            folder_path = item.data(0, self.FOLDER_ROLE) or ""
+            if not folder_path:
+                return
+
+            subdirs = self._subdir_provider(folder_path)
+            for sd in subdirs:
+                name = Path(sd).name
+                child = QTreeWidgetItem(item, [name])
+                child.setData(0, self.FOLDER_ROLE, sd)
+                # Add placeholder for next level
+                self._add_placeholder(child)
+
+    def _on_folder_item_clicked(self, item: QTreeWidgetItem, col: int):
+        path = item.data(0, self.FOLDER_ROLE) or ""
+        self.folder_selected.emit(path)
+
+    # ------------------------------------------------------------------
+    def _on_context_menu(self, pos):
+        paths = self.selected_paths()
+        if not paths:
+            return
+        menu = QMenu(self)
+        action = QAction(f"Remove from Catalog ({len(paths)} selected)", self)
+        action.triggered.connect(lambda: self.samples_delete_requested.emit(paths))
+        menu.addAction(action)
+        menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def _on_selection_changed(self):
         row = self.selected_row()

@@ -13,9 +13,12 @@ Layout:
   │  Tab: Constellation Map                    │
   └────────────────────────────────────────────┘
 """
+import json
 import logging
 import os
 from pathlib import Path
+
+import soundfile as sf
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
@@ -24,8 +27,8 @@ from PySide6.QtWidgets import (
     QPushButton, QSplitter, QStatusBar, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from config import APP_NAME
-from core.analyzer import AnalysisWorker, get_text_embedding
+from config import APP_NAME, DATA_DIR
+from core.analyzer import AnalysisWorker, SemanticSearchWorker
 from core.catalog import Catalog
 from core.player import AudioPlayer
 from core.scanner import ScanWorker
@@ -56,6 +59,12 @@ class MainWindow(QMainWindow):
         self._scan_worker: Optional[ScanWorker] = None
         self._analysis_thread: Optional[QThread] = None
         self._analysis_worker: Optional[AnalysisWorker] = None
+        self._semantic_thread: Optional[QThread] = None
+        self._semantic_worker: Optional[SemanticSearchWorker] = None
+
+        self._scan_folders_path = DATA_DIR / "scan_folders.json"
+        self._current_scan_folder: Optional[str] = None
+        self._active_folder: str = ""  # currently selected folder in tree, "" = all
 
         self._build_ui()
         self._load_stylesheet()
@@ -91,6 +100,11 @@ class MainWindow(QMainWindow):
         self.btn_umap.setToolTip("Generate 2D constellation map from embeddings")
         self.btn_umap.clicked.connect(self._on_build_umap)
 
+        self.btn_export = QPushButton("Export Selected")
+        self.btn_export.setFixedWidth(110)
+        self.btn_export.setToolTip("Export selected samples as WAV")
+        self.btn_export.clicked.connect(self._on_export_selected)
+
         self.search_bar = SearchBar()
 
         self.lbl_count = QLabel("0 samples")
@@ -99,6 +113,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.btn_scan)
         toolbar.addWidget(self.btn_analyse)
         toolbar.addWidget(self.btn_umap)
+        toolbar.addWidget(self.btn_export)
         toolbar.addSpacing(8)
         toolbar.addWidget(self.search_bar, 1)
         toolbar.addWidget(self.lbl_count)
@@ -141,6 +156,10 @@ class MainWindow(QMainWindow):
 
         self.library.sample_selected.connect(self._on_sample_selected)
         self.library.sample_play_requested.connect(self._on_play_sample)
+        self.library.samples_delete_requested.connect(self._on_delete_samples)
+        self.library.folder_selected.connect(self._on_folder_selected)
+        self.library._subdir_provider = self.catalog.get_immediate_subdirs
+        self.library.waveform_delegate._catalog = self.catalog
         self.metadata_panel.sample_selected.connect(self._on_play_sample)
         self.metadata_panel.btn_fav.clicked.connect(self._on_toggle_favorite)
 
@@ -190,7 +209,7 @@ class MainWindow(QMainWindow):
     def _load_stylesheet(self):
         qss_path = Path(__file__).parent / "styles" / "dark_theme.qss"
         try:
-            self.setStyleSheet(qss_path.read_text())
+            self.setStyleSheet(qss_path.read_text(encoding="utf-8"))
         except Exception as exc:
             log.warning("Could not load stylesheet: %s", exc)
 
@@ -200,6 +219,10 @@ class MainWindow(QMainWindow):
             removed = self.catalog.purge_paths_containing(bad)
             if removed:
                 log.info("Purged %d stale entries containing '%s'", removed, bad)
+        # Restore scan folder list
+        folders = self._load_scan_folders()
+        if folders:
+            self.library.set_folders(folders)
         samples = self.catalog.get_all()
         self.library.load_samples(samples)
         self._update_count()
@@ -212,6 +235,7 @@ class MainWindow(QMainWindow):
         if not folder:
             return
 
+        self._current_scan_folder = folder
         self._stop_scan()
 
         worker = ScanWorker(folder, self.catalog)
@@ -248,8 +272,27 @@ class MainWindow(QMainWindow):
     def _on_scan_finished(self, total: int):
         self.progress.setVisible(False)
         self.btn_scan.setEnabled(True)
+        if self._current_scan_folder:
+            self.library.add_folder(self._current_scan_folder)
+            self._save_scan_folders(self.library.folders())
+            self._current_scan_folder = None
         self.status.showMessage(f"Scan complete — {total} new files added")
         self._stop_scan()
+
+    def _load_scan_folders(self) -> list[str]:
+        try:
+            if self._scan_folders_path.exists():
+                return json.loads(self._scan_folders_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            log.warning("Could not load scan folders: %s", exc)
+        return []
+
+    def _save_scan_folders(self, folders: list[str]):
+        try:
+            self._scan_folders_path.parent.mkdir(parents=True, exist_ok=True)
+            self._scan_folders_path.write_text(json.dumps(folders, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as exc:
+            log.warning("Could not save scan folders: %s", exc)
 
     def _stop_scan(self):
         if self._scan_worker:
@@ -407,42 +450,128 @@ class MainWindow(QMainWindow):
                 self.metadata_panel.load_sample(updated)
 
     # ------------------------------------------------------------------
+    # Delete from catalog
+    # ------------------------------------------------------------------
+    @Slot(list)
+    def _on_delete_samples(self, paths: list):
+        for fp in paths:
+            row = self.catalog.get_by_path(fp)
+            if row and row.get("embedding_id"):
+                self.vector_store.delete(row["embedding_id"])
+            self.catalog.delete_by_path(fp)
+        self.library.load_samples(self.catalog.get_all())
+        self._update_count()
+        self.status.showMessage(f"Removed {len(paths)} sample(s) from catalog")
+
+    # ------------------------------------------------------------------
+    # Export
+    # ------------------------------------------------------------------
+    def _on_export_selected(self):
+        paths = self.library.selected_paths()
+        if not paths:
+            self.status.showMessage("No samples selected for export.")
+            return
+
+        dest_dir = QFileDialog.getExistingDirectory(self, "Select Export Destination")
+        if not dest_dir:
+            return
+
+        exported = 0
+        for fp in paths:
+            try:
+                info = sf.info(fp)
+                data, _ = sf.read(fp, dtype="float32", always_2d=False)
+                dest = os.path.join(dest_dir, os.path.splitext(os.path.basename(fp))[0] + ".wav")
+                sf.write(dest, data, info.samplerate, subtype=info.subtype or "PCM_16")
+                exported += 1
+            except Exception as exc:
+                log.warning("Export failed for %s: %s", fp, exc)
+
+        self.status.showMessage(f"Exported {exported}/{len(paths)} sample(s) to {dest_dir}")
+
+    # ------------------------------------------------------------------
+    @Slot(str)
+    def _on_folder_selected(self, path: str):
+        self._active_folder = path
+        if path:
+            samples = self.catalog.get_by_folder_prefix(path)
+        else:
+            samples = self.catalog.get_all()
+        self.library.load_samples(samples)
+        self.search_bar.set_status(f"{len(samples)} samples")
+
+    def _apply_scope_filter(self, rows: list[dict]) -> list[dict]:
+        scope = self.search_bar.scope()
+        if scope == "all" or not self._active_folder:
+            return rows
+        if scope == "folder":
+            active = str(Path(self._active_folder))
+            return [r for r in rows if str(Path(r.get("file_path", ""))).startswith(active)]
+        if scope == "disk":
+            try:
+                drive = Path(self._active_folder).drive
+            except Exception:
+                return rows
+            if not drive:
+                return rows
+            return [r for r in rows if Path(r.get("file_path", "")).drive == drive]
+        return rows
+
+    # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
     @Slot(str)
     def _on_text_search(self, query: str):
         results = self.catalog.search(query)
+        results = self._apply_scope_filter(results)
         self.library.load_samples(results)
         self.search_bar.set_status(f"{len(results)} results")
         self.status.showMessage(f"Search: '{query}' → {len(results)} samples")
 
     @Slot(str)
     def _on_semantic_search(self, query: str):
+        self._stop_semantic_search()
+        self.search_bar.set_status("Searching…")
         self.status.showMessage(f"Running semantic search: '{query}'…")
-        embedding = get_text_embedding(query)
-        if not embedding:
-            self.status.showMessage("Failed to generate text embedding.")
-            self.search_bar.set_status("Error")
-            return
 
-        similar = self.vector_store.find_by_text(embedding)
-        if not similar:
-            self.status.showMessage("No results found.")
-            self.search_bar.set_status("0 results")
-            return
+        worker = SemanticSearchWorker(query, self.vector_store)
+        thread = QThread(self)
+        worker.moveToThread(thread)
 
+        worker.results_ready.connect(self._on_semantic_results)
+        worker.error.connect(lambda e: self.status.showMessage(f"Search error: {e}"))
+        thread.started.connect(worker.run)
+
+        self._semantic_worker = worker
+        self._semantic_thread = thread
+        thread.start()
+
+    @Slot(list)
+    def _on_semantic_results(self, similar: list):
         fps = [s["file_path"] for s in similar]
-        rows = {r["file_path"]: r for r in self.catalog.get_all() if r["file_path"] in fps}
+        # Batch lookup — O(1 query) instead of loading all records
+        rows = {r["file_path"]: r for r in self.catalog.get_by_paths(fps)}
         results = []
         for s in similar:
             row = rows.get(s["file_path"])
             if row:
                 results.append(row)
 
+        results = self._apply_scope_filter(results)
         self.library.load_samples(results)
-        msg = f"{len(results)} semantic matches for: \"{query}\""
-        self.search_bar.set_status(f"{len(results)} results")
-        self.status.showMessage(msg)
+        n = len(results)
+        self.search_bar.set_status(f"{n} results")
+        self.status.showMessage(f"{n} semantic matches")
+        self._stop_semantic_search()
+
+    def _stop_semantic_search(self):
+        if self._semantic_worker:
+            self._semantic_worker.stop()
+        if self._semantic_thread:
+            self._semantic_thread.quit()
+            self._semantic_thread.wait(2000)
+        self._semantic_worker = None
+        self._semantic_thread = None
 
     # ------------------------------------------------------------------
     def _update_count(self):
@@ -451,8 +580,15 @@ class MainWindow(QMainWindow):
         self.lbl_count.setText(f"{n:,} samples · {na:,} analysed")
 
     # ------------------------------------------------------------------
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Space:
+            self.player.toggle_play_pause()
+            return
+        super().keyPressEvent(event)
+
     def closeEvent(self, event):
         self._stop_scan()
         self._stop_analysis()
+        self._stop_semantic_search()
         self.player.stop()
         event.accept()

@@ -3,6 +3,8 @@ import json
 import logging
 import sqlite3
 import time
+
+import numpy as np
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -36,7 +38,8 @@ CREATE TABLE IF NOT EXISTS samples (
     color_label     TEXT,
     -- Timestamps
     scanned_at      REAL,
-    analyzed_at     REAL
+    analyzed_at     REAL,
+    waveform_peaks  BLOB
 );
 
 CREATE INDEX IF NOT EXISTS idx_extension  ON samples(extension);
@@ -55,6 +58,12 @@ class Catalog:
     def _init_db(self):
         with self._conn() as conn:
             conn.executescript(CREATE_SQL)
+        # Migration: add waveform_peaks column to existing DBs
+        try:
+            with self._conn() as conn:
+                conn.execute("ALTER TABLE samples ADD COLUMN waveform_peaks BLOB")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         log.info("Catalog ready at %s", self.db_path)
 
     @contextmanager
@@ -93,6 +102,10 @@ class Catalog:
     def update_analysis(self, file_path: str, analysis: Dict[str, Any]):
         analysis["analyzed_at"] = time.time()
         analysis["file_path"] = file_path
+        if "waveform_peaks" in analysis and isinstance(analysis["waveform_peaks"], np.ndarray):
+            analysis["waveform_peaks"] = sqlite3.Binary(
+                analysis["waveform_peaks"].astype(np.float32).tobytes()
+            )
         cols = ", ".join(f"{k}=:{k}" for k in analysis if k != "file_path")
         sql = f"UPDATE samples SET {cols} WHERE file_path=:file_path"
         with self._conn() as conn:
@@ -136,6 +149,21 @@ class Catalog:
             row = conn.execute("SELECT * FROM samples WHERE file_path=?", (file_path,)).fetchone()
         return self._row_to_dict(row) if row else None
 
+    # ------------------------------------------------------------------
+    # Waveform
+    # ------------------------------------------------------------------
+    def store_waveform(self, file_path: str, peaks: np.ndarray):
+        data = sqlite3.Binary(peaks.astype(np.float32).tobytes())
+        with self._conn() as conn:
+            conn.execute("UPDATE samples SET waveform_peaks=? WHERE file_path=?", (data, file_path))
+
+    def get_waveform(self, file_path: str) -> Optional[np.ndarray]:
+        with self._conn() as conn:
+            row = conn.execute("SELECT waveform_peaks FROM samples WHERE file_path=?", (file_path,)).fetchone()
+        if row and row[0]:
+            return np.frombuffer(row[0], dtype=np.float32)
+        return None
+
     def search(self, query: str) -> List[Dict]:
         q = f"%{query}%"
         sql = """SELECT * FROM samples
@@ -145,6 +173,49 @@ class Catalog:
             rows = conn.execute(sql, (q, q, q)).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
+    def get_by_folder_prefix(self, folder_path: str) -> List[Dict]:
+        """Return all samples whose file_path starts with folder_path (recursive).
+        Normalizes / to \\ to handle mixed separators from QFileDialog."""
+        import os
+        prefix = os.path.normpath(folder_path) + os.sep
+        escaped = self._escape_like(prefix)
+        bs = chr(92)  # single backslash — parameterised to avoid SQL string-escape confusion
+
+        sql = ("SELECT * FROM samples WHERE REPLACE(file_path, '/', ?) "
+               "LIKE ? ESCAPE '!' ORDER BY file_name COLLATE NOCASE")
+        with self._conn() as conn:
+            rows = conn.execute(sql, (bs, escaped + "%")).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_immediate_subdirs(self, folder_path: str) -> List[str]:
+        """Return sorted list of immediate child directory paths under folder_path."""
+        import os
+        prefix = os.path.normpath(folder_path)
+        bs = chr(92)
+        escaped = self._escape_like(prefix + os.sep)
+
+        sql = ("SELECT DISTINCT file_path FROM samples "
+               "WHERE REPLACE(file_path, '/', ?) LIKE ? ESCAPE '!'")
+        with self._conn() as conn:
+            rows = conn.execute(sql, (bs, escaped + "%")).fetchall()
+
+        subdirs: set[str] = set()
+        plen = len(prefix) + 1  # +1 for the separator
+        for (fp,) in rows:
+            fp_norm = fp.replace("/", "\\")
+            if len(fp_norm) <= plen:
+                continue
+            rest = fp_norm[plen:]
+            first_part = rest.split("\\", 1)[0]
+            if first_part:
+                subdirs.add(os.path.join(prefix, first_part))
+        return sorted(subdirs, key=lambda p: p.lower())
+
+    @staticmethod
+    def _escape_like(s: str) -> str:
+        """Escape LIKE special characters using ! as escape char."""
+        return s.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+
     def get_by_ids(self, ids: List[str]) -> List[Dict]:
         if not ids:
             return []
@@ -152,6 +223,16 @@ class Catalog:
         sql = f"SELECT * FROM samples WHERE embedding_id IN ({placeholders})"
         with self._conn() as conn:
             rows = conn.execute(sql, ids).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_by_paths(self, paths: List[str]) -> List[Dict]:
+        """Batch lookup by file_path instead of loading all records."""
+        if not paths:
+            return []
+        placeholders = ",".join("?" * len(paths))
+        sql = f"SELECT * FROM samples WHERE file_path IN ({placeholders})"
+        with self._conn() as conn:
+            rows = conn.execute(sql, paths).fetchall()
         return [self._row_to_dict(r) for r in rows]
 
     def count(self) -> int:
@@ -184,4 +265,6 @@ class Catalog:
                 d["tags"] = json.loads(d["tags"])
             except json.JSONDecodeError:
                 d["tags"] = []
+        if d.get("waveform_peaks") and isinstance(d["waveform_peaks"], bytes):
+            d["waveform_peaks"] = np.frombuffer(d["waveform_peaks"], dtype=np.float32)
         return d

@@ -11,6 +11,7 @@ librosa>=0.10.1
 # AI / Embeddings
 torch>=2.1.0
 transformers>=4.36.0
+glap_model>=0.0.13
 
 # Vector Database
 chromadb>=0.4.22
