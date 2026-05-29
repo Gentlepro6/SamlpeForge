@@ -171,8 +171,9 @@ def get_text_embedding(text: str) -> Optional[List[float]]:
     import torch
     try:
         model = _load_glap()
+        # GLAP expects prompted text: "The sound of {label} can be heard."
         with torch.no_grad():
-            emb = model.encode_text([text])
+            emb = model.encode_text([f"The sound of {text} can be heard."])
         return emb.squeeze().cpu().numpy().tolist()
     except Exception as exc:
         log.error("Text embedding failed: %s", exc)
