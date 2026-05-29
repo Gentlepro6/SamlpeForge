@@ -1,0 +1,78 @@
+{
+  "name": "sampleforge",
+  "version": "1.0.0",
+  "description": "AI-Powered Audio Sample Manager — multilingual semantic search for sound libraries",
+  "main": "main.js",
+  "author": "Marcosblancarg",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "electron": "^34.5.8",
+    "electron-builder": "^25.0.0"
+  },
+  "dependencies": {
+    "python-shell": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.sampleforge.app",
+    "productName": "SampleForge",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "../**/*.py",
+      "../config.py",
+      "../core/**/*",
+      "../ui/**/*",
+      "../utils/**/*",
+      "../requirements.txt"
+    ],
+    "extraResources": [
+      {
+        "from": "../data",
+        "to": "data",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "../assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SampleForge",
+      "installerIcon": "../assets/icon.ico",
+      "uninstallerIcon": "../assets/icon.ico",
+      "installerHeaderIcon": "../assets/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "icon": "../assets/icon.icns",
+      "category": "public.app-category.music"
+    }
+  }
+}
