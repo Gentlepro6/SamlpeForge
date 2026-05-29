@@ -480,9 +480,10 @@ class MainWindow(QMainWindow):
         count, embedding_ids = self.catalog.delete_by_folder(folder_path)
         for eid in embedding_ids:
             self.vector_store.delete(eid)
-        # Remove from saved folders
+        # Remove from saved folders (normalize paths for comparison)
+        target = str(Path(folder_path))
         folders = self._load_scan_folders()
-        folders = [f for f in folders if f != folder_path]
+        folders = [f for f in folders if str(Path(f)) != target]
         self._save_scan_folders(folders)
         # Rebuild tree without this folder
         self.library.set_folders(folders)

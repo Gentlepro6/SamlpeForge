@@ -344,14 +344,15 @@ class LibraryView(QWidget):
         self.folder_selected.emit(path)
 
     def _on_folder_context_menu(self, pos):
-        log.info("Folder context menu triggered at (%d,%d)", pos.x(), pos.y())
         item = self.folder_tree.itemAt(pos)
         if not item:
-            log.info("Folder ctx menu: no item at position")
             return
         path = item.data(0, self.FOLDER_ROLE) or ""
-        log.info("Folder ctx menu: path='%s' in_added=%s", path, path in self._added_folders)
-        if not path or path not in self._added_folders:
+        if not path:
+            return
+        # Normalize path separators for comparison (tree uses \, JSON may use /)
+        path_norm = str(Path(path))
+        if not any(Path(f) == Path(path_norm) for f in self._added_folders):
             return
         menu = QMenu(self)
         action = QAction("Remove Folder from Library", self)
