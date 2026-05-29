@@ -124,25 +124,21 @@ function startPythonApp() {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
-  let firstOutput = true;
   pyProcess.stdout.on("data", (data) => {
-    const msg = data.toString().trim();
-    console.log(`[python] ${msg}`);
-    // Hide the launcher window once Python starts producing output.
-    // The PySide6 app creates its own native window.
-    if (firstOutput) {
-      firstOutput = false;
-      setTimeout(() => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.hide();
-        }
-      }, 1500); // give Qt window time to appear
-    }
+    console.log(`[python] ${data.toString().trim()}`);
   });
 
   pyProcess.stderr.on("data", (data) => {
     console.error(`[python:err] ${data.toString().trim()}`);
   });
+
+  // The PySide6 app creates its own native window — hide the Electron
+  // launcher after a few seconds to give Qt time to initialize.
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.hide();
+    }
+  }, 3000);
 
   pyProcess.on("error", (err) => {
     dialog.showErrorBox(
