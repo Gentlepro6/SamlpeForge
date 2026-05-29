@@ -14,6 +14,9 @@ CACHE_DIR = DATA_DIR / "cache"
 for d in (DATA_DIR, CHROMA_DIR, CACHE_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
+# --- Hugging Face mirror for China ---
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
 # --- GLAP Model (multilingual, supports Chinese) ---
 GLAP_MODEL_ID = "mispeech/GLAP"
 EMBEDDING_DIM = 1024
