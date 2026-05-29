@@ -366,7 +366,7 @@ class LibraryView(QWidget):
         action.triggered.connect(lambda: self.folder_remove_requested.emit(path))
         menu.addAction(action)
         menu.exec(self.folder_tree.viewport().mapToGlobal(
-            self.folder_tree.visualItemRect(item).center().toPoint()
+            self.folder_tree.visualItemRect(item).center()
         ))
 
     # ------------------------------------------------------------------
