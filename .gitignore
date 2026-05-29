@@ -19,9 +19,7 @@ dist/
 *.spec.bak
 
 # App data (DB, embeddings, cache — generados en runtime)
-data/catalog.db
-data/chroma/
-data/cache/
+data/
 
 # macOS
 .DS_Store

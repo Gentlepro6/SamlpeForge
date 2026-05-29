@@ -38,10 +38,17 @@
     ],
     "extraResources": [
       {
-        "from": "../data",
-        "to": "data",
+        "from": "python",
+        "to": "python",
         "filter": [
-          "**/*"
+          "python.exe",
+          "pythonw.exe",
+          "python3.dll",
+          "python312.dll",
+          "vcruntime140*.dll",
+          "DLLs/**/*",
+          "Lib/**/*",
+          "Scripts/**/*"
         ]
       }
     ],
@@ -53,8 +60,7 @@
             "x64"
           ]
         }
-      ],
-      "icon": "../assets/icon.ico"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -63,15 +69,15 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "SampleForge",
-      "installerIcon": "../assets/icon.ico",
-      "uninstallerIcon": "../assets/icon.ico",
-      "installerHeaderIcon": "../assets/icon.ico"
+      "deleteAppDataOnUninstall": false,
+      "differentialPackage": false,
+      "packElevateHelper": false
     },
+    "compression": "maximum",
     "mac": {
       "target": [
         "dmg"
       ],
-      "icon": "../assets/icon.icns",
       "category": "public.app-category.music"
     }
   }

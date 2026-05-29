@@ -2,7 +2,7 @@
  * SampleForge Electron Main Process
  *
  * Launches the Python/PySide6 application and manages its lifecycle.
- * Electron provides native OS integration: installer, tray, file associations.
+ * Bundles a portable Python 3.12 runtime — no system Python required.
  */
 const { app, BrowserWindow, dialog, Menu, Tray, nativeImage } = require("electron");
 const path = require("path");
@@ -18,28 +18,62 @@ let tray = null;
 let isQuitting = false;
 
 // ---------------------------------------------------------------------------
+// Path helpers
+// ---------------------------------------------------------------------------
+
+function isDev() {
+  return !app.isPackaged;
+}
+
+function getPythonDir() {
+  // Dev: electron/python/   Prod: resources/python/
+  if (isDev()) return path.join(__dirname, "python");
+  return path.join(process.resourcesPath, "python");
+}
+
+function getPythonExe() {
+  const exe = path.join(getPythonDir(), "python.exe");
+  if (fs.existsSync(exe)) return exe;
+  // Fallback: system Python
+  return process.platform === "win32" ? "python" : "python3";
+}
+
+function getAppRoot() {
+  // Dev: __dirname/.. = SamlpeForge root
+  // Prod: __dirname = resources/app/ which IS the app root
+  if (isDev()) return path.join(__dirname, "..");
+  return __dirname;
+}
+
+// ---------------------------------------------------------------------------
 // Python process management
 // ---------------------------------------------------------------------------
 
-function findPython() {
-  // Priority: bundled Python > system python3 > system python
-  const bundled = path.join(process.resourcesPath, "python", "python.exe");
-  if (fs.existsSync(bundled)) return bundled;
-  if (process.platform === "win32") return "python";
-  return "python3";
-}
-
 function startPythonApp() {
-  const pythonExe = findPython();
-  const appRoot = path.join(__dirname, "..");
+  const pythonExe = getPythonExe();
+  const pythonDir = getPythonDir();
+  const appRoot = getAppRoot();
 
   const args = ["-u", path.join(appRoot, "main.py")];
 
+  // Build environment: add bundled Python & site-packages to PATH/PYTHONPATH
   const env = {
     ...process.env,
     SAMPLEFORGE_DATA_DIR: path.join(app.getPath("userData"), "data"),
     ELECTRON_RUN: "1",
+    // Ensure Python finds its DLLs and site-packages
+    PATH: [
+      pythonDir,
+      path.join(pythonDir, "Scripts"),
+      path.join(pythonDir, "DLLs"),
+      process.env.PATH,
+    ].join(path.delimiter),
+    PYTHONHOME: pythonDir,
   };
+
+  // Remove system Python paths to avoid conflicts with bundled version
+  delete env.VIRTUAL_ENV;
+  delete env.PYTHONPATH;
 
   pyProcess = spawn(pythonExe, args, {
     cwd: appRoot,
@@ -57,9 +91,8 @@ function startPythonApp() {
 
   pyProcess.on("error", (err) => {
     dialog.showErrorBox(
-      "Python Error",
-      `Failed to start Python process:\n${err.message}\n\n` +
-        "Please ensure Python 3.10–3.12 is installed and in your PATH."
+      "Python Engine Error",
+      `Failed to start Python engine:\n${err.message}`
     );
     app.quit();
   });
