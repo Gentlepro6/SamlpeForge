@@ -26,7 +26,7 @@ function rmGlob(baseDir, pattern) {
 }
 
 // Remove unnecessary stdlib
-["Lib/test", "Lib/unittest", "Lib/distutils", "Lib/ensurepip",
+["Lib/test", "Lib/distutils", "Lib/ensurepip",
  "Lib/idlelib", "Lib/turtledemo", "Lib/venv", "Lib/tkinter", "Lib/lib2to3",
  "include", "libs", "tcl",
 ].forEach(d => rmDir(path.join(PYTHON_DIR, d)));

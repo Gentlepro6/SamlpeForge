@@ -22,7 +22,7 @@
   "build": {
     "appId": "com.sampleforge.app",
     "productName": "SampleForge",
-    "icon": "../assets/icon.png",
+    "icon": "../assets/icon.ico",
     "directories": {
       "output": "dist"
     },
@@ -30,6 +30,7 @@
       "main.js",
       "preload.js",
       "renderer/**/*",
+      "icon.ico",
       "icon.png"
     ],
     "extraResources": [

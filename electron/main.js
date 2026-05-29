@@ -46,12 +46,20 @@ function getAppRoot() {
 }
 
 function getIconPath() {
-  const icon = path.join(__dirname, "icon.png");
-  if (fs.existsSync(icon)) return icon;
-  // Fallback for dev when running from electron/ and icon is at ../assets/
-  const fallback = path.join(__dirname, "..", "assets", "icon.png");
-  if (fs.existsSync(fallback)) return fallback;
-  return icon; // return default path even if missing — Electron will use default icon
+  // Prefer .ico on Windows for best compatibility
+  const names = process.platform === "win32"
+    ? ["icon.ico", "icon.png"]
+    : ["icon.png", "icon.ico"];
+  for (const name of names) {
+    const p = path.join(__dirname, name);
+    if (fs.existsSync(p)) return p;
+  }
+  // Fallback for dev: ../assets/
+  for (const name of names) {
+    const p = path.join(__dirname, "..", "assets", name);
+    if (fs.existsSync(p)) return p;
+  }
+  return path.join(__dirname, "icon.png");
 }
 
 // ---------------------------------------------------------------------------
