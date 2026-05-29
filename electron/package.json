@@ -28,13 +28,7 @@
     "files": [
       "main.js",
       "preload.js",
-      "renderer/**/*",
-      "../**/*.py",
-      "../config.py",
-      "../core/**/*",
-      "../ui/**/*",
-      "../utils/**/*",
-      "../requirements.txt"
+      "renderer/**/*"
     ],
     "extraResources": [
       {
@@ -49,6 +43,18 @@
           "DLLs/**/*",
           "Lib/**/*",
           "Scripts/**/*"
+        ]
+      },
+      {
+        "from": "..",
+        "to": ".",
+        "filter": [
+          "main.py",
+          "config.py",
+          "requirements.txt",
+          "core/**/*",
+          "ui/**/*",
+          "utils/**/*"
         ]
       }
     ],
@@ -73,6 +79,7 @@
       "differentialPackage": false,
       "packElevateHelper": false
     },
+    "asar": false,
     "compression": "maximum",
     "mac": {
       "target": [

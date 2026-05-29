@@ -40,9 +40,9 @@ function getPythonExe() {
 
 function getAppRoot() {
   // Dev: __dirname/.. = SamlpeForge root
-  // Prod: __dirname = resources/app/ which IS the app root
+  // Prod: extraResources puts .py files at resources/, not inside app/
   if (isDev()) return path.join(__dirname, "..");
-  return __dirname;
+  return process.resourcesPath;
 }
 
 // ---------------------------------------------------------------------------
@@ -53,15 +53,41 @@ function startPythonApp() {
   const pythonExe = getPythonExe();
   const pythonDir = getPythonDir();
   const appRoot = getAppRoot();
+  const mainPy = path.join(appRoot, "main.py");
 
-  const args = ["-u", path.join(appRoot, "main.py")];
+  console.log(`[electron] Python exe: ${pythonExe} (exists: ${fs.existsSync(pythonExe)})`);
+  console.log(`[electron] Python dir: ${pythonDir}`);
+  console.log(`[electron] App root:   ${appRoot}`);
+  console.log(`[electron] main.py:    ${mainPy} (exists: ${fs.existsSync(mainPy)})`);
+
+  // If bundled Python is missing, show detailed error
+  if (!fs.existsSync(pythonExe)) {
+    dialog.showErrorBox(
+      "Python Engine Error",
+      `Bundled Python not found at:\n${pythonExe}\n\n` +
+      `Python dir contents: ${fs.existsSync(pythonDir) ? fs.readdirSync(pythonDir).slice(0, 10).join(", ") : "(dir missing)"}`
+    );
+    app.quit();
+    return;
+  }
+
+  if (!fs.existsSync(mainPy)) {
+    dialog.showErrorBox(
+      "Python Engine Error",
+      `main.py not found at:\n${mainPy}\n\n` +
+      `App root contents: ${fs.readdirSync(appRoot).slice(0, 20).join(", ")}`
+    );
+    app.quit();
+    return;
+  }
+
+  const args = ["-u", mainPy];
 
   // Build environment: add bundled Python & site-packages to PATH/PYTHONPATH
   const env = {
     ...process.env,
     SAMPLEFORGE_DATA_DIR: path.join(app.getPath("userData"), "data"),
     ELECTRON_RUN: "1",
-    // Ensure Python finds its DLLs and site-packages
     PATH: [
       pythonDir,
       path.join(pythonDir, "Scripts"),
@@ -92,7 +118,7 @@ function startPythonApp() {
   pyProcess.on("error", (err) => {
     dialog.showErrorBox(
       "Python Engine Error",
-      `Failed to start Python engine:\n${err.message}`
+      `Failed to start Python engine:\n${err.message}\n\nPath: ${pythonExe}`
     );
     app.quit();
   });
