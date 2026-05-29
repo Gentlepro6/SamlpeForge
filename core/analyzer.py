@@ -193,7 +193,7 @@ class AnalysisWorker(QObject):
 
     progress = Signal(int, int)       # (done, total)
     sample_analysed = Signal(str)     # file_path
-    finished = Signal(int)
+    finished = Signal(int, int)       # (successes, total)
     error = Signal(str)
 
     def __init__(self, catalog: Catalog, vector_store: VectorStore):
@@ -213,6 +213,7 @@ class AnalysisWorker(QObject):
             all_samples = self.catalog.get_all()
             pending = [s for s in all_samples if s.get("analyzed_at") is None]
             total = len(pending)
+            successes = 0
             log.info("Analysing %d samples …", total)
 
             for idx, sample in enumerate(pending):
@@ -235,10 +236,11 @@ class AnalysisWorker(QObject):
                     # Update SQLite
                     self.catalog.update_analysis(fp, result)
                     self.sample_analysed.emit(fp)
+                    successes += 1
 
                 self.progress.emit(idx + 1, total)
 
-            self.finished.emit(total)
+            self.finished.emit(successes, total)
 
         except Exception as exc:
             log.exception("Analysis worker error")

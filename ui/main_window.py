@@ -348,11 +348,22 @@ class MainWindow(QMainWindow):
             if updated:
                 self.metadata_panel.load_sample(updated)
 
-    @Slot(int)
-    def _on_analysis_finished(self, total: int):
+    @Slot(int, int)
+    def _on_analysis_finished(self, successes: int, total: int):
         self.progress.setVisible(False)
         self.btn_analyse.setEnabled(True)
-        self.status.showMessage(f"Analysis complete — {total} samples processed")
+        if successes == 0 and total > 0:
+            self.status.showMessage(
+                f"Analysis failed — {total} sample(s) attempted, 0 succeeded. "
+                "Check console for details (librosa / GLAP errors)."
+            )
+        elif successes < total:
+            self.status.showMessage(
+                f"Analysis partial — {successes}/{total} succeeded, "
+                f"{total - successes} skipped"
+            )
+        else:
+            self.status.showMessage(f"Analysis complete — {total} samples processed")
         # Reload library to show updated features
         self.library.load_samples(self.catalog.get_all())
         self._stop_analysis()
