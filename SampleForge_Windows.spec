@@ -14,17 +14,21 @@ added_datas = [
 ]
 
 hidden_imports = [
-    # transformers / CLAP
+    # transformers + GLAP (mispeech/GLAP, trust_remote_code)
     "transformers",
-    "transformers.models.clap",
-    "transformers.models.clap.modeling_clap",
-    "transformers.models.clap.processing_clap",
-    "transformers.models.clap.feature_extraction_clap",
     "transformers.pipelines",
     "huggingface_hub",
     "huggingface_hub.file_download",
     "safetensors",
     "safetensors.torch",
+    # GLAP dependencies
+    "glap_model",
+    "dasheng",
+    "sentencepiece",
+    "einops",
+    "torchaudio",
+    "loguru",
+    "pytorch_ignite",
     # torch
     "torch",
     "torch.nn",
