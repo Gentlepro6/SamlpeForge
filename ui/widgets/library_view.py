@@ -344,10 +344,13 @@ class LibraryView(QWidget):
         self.folder_selected.emit(path)
 
     def _on_folder_context_menu(self, pos):
+        log.debug("Folder context menu at %s", pos)
         item = self.folder_tree.itemAt(pos)
         if not item:
+            log.debug("No item at position")
             return
         path = item.data(0, self.FOLDER_ROLE) or ""
+        log.debug("Folder item path='%s' in_added=%s", path, path in self._added_folders)
         if not path or path not in self._added_folders:
             return
         menu = QMenu(self)
