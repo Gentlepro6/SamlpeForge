@@ -216,8 +216,13 @@ class MainWindow(QMainWindow):
         return tab
 
     def _load_stylesheet(self):
-        qss_path = Path(__file__).parent / "styles" / "dark_theme.qss"
         try:
+            import sys
+            if getattr(sys, "frozen", False):
+                base = Path(sys._MEIPASS)
+            else:
+                base = Path(__file__).parent.parent
+            qss_path = base / "ui" / "styles" / "dark_theme.qss"
             self.setStyleSheet(qss_path.read_text(encoding="utf-8"))
         except Exception as exc:
             log.warning("Could not load stylesheet: %s", exc)

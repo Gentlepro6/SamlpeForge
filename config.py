@@ -1,12 +1,20 @@
 """Global configuration for the Audio Sample Manager."""
 import os
 import platform
+import sys
 from pathlib import Path
 
 # --- Paths ---
 APP_NAME = "SampleForge"
-APP_DIR = Path(__file__).parent
-DATA_DIR = APP_DIR / "data"
+
+if getattr(sys, "frozen", False):
+    # sys._MEIPASS is the read-only app bundle (_internal dir)
+    APP_DIR = Path(sys._MEIPASS)
+    # Writable data goes alongside the exe or to user's AppData
+    DATA_DIR = Path(os.environ.get("SAMPLEFORGE_DATA_DIR", Path(sys.executable).parent / "data"))
+else:
+    APP_DIR = Path(__file__).parent
+    DATA_DIR = APP_DIR / "data"
 DB_PATH = DATA_DIR / "catalog.db"
 CHROMA_DIR = DATA_DIR / "chroma"
 CACHE_DIR = DATA_DIR / "cache"
