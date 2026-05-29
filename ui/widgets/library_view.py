@@ -26,6 +26,15 @@ COL_IDX = {c: i for i, c in enumerate(COLUMNS)}
 WaveformRole = Qt.UserRole + 2
 
 
+class FolderTree(QTreeWidget):
+    """QTreeWidget that emits a signal on right-click for context menu."""
+    folder_context_requested = Signal(object)  # QTreeWidgetItem or None
+
+    def contextMenuEvent(self, event):
+        item = self.itemAt(event.pos())
+        self.folder_context_requested.emit(item)
+
+
 class SampleTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -146,7 +155,7 @@ class LibraryView(QWidget):
         splitter = QSplitter(Qt.Horizontal)
 
         # ── Folder Tree ──────────────────────────────────────────────
-        self.folder_tree = QTreeWidget()
+        self.folder_tree = FolderTree()
         self.folder_tree.setHeaderHidden(True)
         self.folder_tree.setMinimumWidth(200)
         self.folder_tree.setMaximumWidth(320)
@@ -155,8 +164,7 @@ class LibraryView(QWidget):
         self.folder_tree.setAnimated(True)
         self.folder_tree.itemClicked.connect(self._on_folder_item_clicked)
         self.folder_tree.itemExpanded.connect(self._on_item_expanded)
-        self.folder_tree.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.folder_tree.customContextMenuRequested.connect(self._on_folder_context_menu)
+        self.folder_tree.folder_context_requested.connect(self._on_folder_context_menu)
         # "All Samples" root item
         self._all_item = QTreeWidgetItem(self.folder_tree, ["All Samples"])
         self._all_item.setData(0, self.FOLDER_ROLE, "")
@@ -343,8 +351,7 @@ class LibraryView(QWidget):
         path = item.data(0, self.FOLDER_ROLE) or ""
         self.folder_selected.emit(path)
 
-    def _on_folder_context_menu(self, pos):
-        item = self.folder_tree.itemAt(pos)
+    def _on_folder_context_menu(self, item):
         if not item:
             return
         path = item.data(0, self.FOLDER_ROLE) or ""
@@ -358,7 +365,9 @@ class LibraryView(QWidget):
         action = QAction("Remove Folder from Library", self)
         action.triggered.connect(lambda: self.folder_remove_requested.emit(path))
         menu.addAction(action)
-        menu.exec(self.folder_tree.viewport().mapToGlobal(pos))
+        menu.exec(self.folder_tree.viewport().mapToGlobal(
+            self.folder_tree.visualItemRect(item).center().toPoint()
+        ))
 
     # ------------------------------------------------------------------
     def _on_context_menu(self, pos):
