@@ -35,11 +35,11 @@ class SearchBar(QWidget):
 
         # Mode selector
         self.mode = QComboBox()
-        self.mode.addItem("Filter", "filter")
         self.mode.addItem("Catalog Search", "text")
         self.mode.addItem("AI Semantic", "semantic")
+        self.mode.addItem("Filter", "filter")
         self.mode.setFixedWidth(130)
-        self.mode.setToolTip("Search mode")
+        self.mode.setToolTip("Search mode — Catalog Search matches filenames, tags & categories")
 
         # Scope selector
         self.scope_combo = QComboBox()

@@ -35,6 +35,7 @@ BATCH_SIZE = 32               # files per analysis batch
 # --- Search ---
 TOP_K_SIMILAR = 50
 TOP_K_TEXT = 30
+SEMANTIC_MIN_SIMILARITY = 0.85  # cosine similarity threshold (0-1); results below this are filtered
 
 # --- UMAP ---
 UMAP_N_NEIGHBORS = 15

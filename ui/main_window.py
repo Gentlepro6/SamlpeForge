@@ -22,6 +22,7 @@ import soundfile as sf
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
+from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QMainWindow, QProgressBar,
     QPushButton, QSplitter, QStatusBar, QTabWidget, QVBoxLayout, QWidget,
@@ -149,6 +150,12 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.status)
         self.status.showMessage("Ready")
 
+        # Global shortcuts — work even when child widgets have focus
+        play_shortcut = QShortcut(self)
+        play_shortcut.setKey(Qt.Key_Space)
+        play_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+        play_shortcut.activated.connect(self.player.toggle_play_pause)
+
         # ── Signals ───────────────────────────────────────────────────
         self.search_bar.text_search.connect(self._on_text_search)
         self.search_bar.semantic_search.connect(self._on_semantic_search)
@@ -157,6 +164,7 @@ class MainWindow(QMainWindow):
         self.library.sample_selected.connect(self._on_sample_selected)
         self.library.sample_play_requested.connect(self._on_play_sample)
         self.library.samples_delete_requested.connect(self._on_delete_samples)
+        self.library.sample_find_similar.connect(self._on_find_similar)
         self.library.folder_selected.connect(self._on_folder_selected)
         self.library.folder_remove_requested.connect(self._on_remove_folder)
         self.library._subdir_provider = self.catalog.get_immediate_subdirs
@@ -493,6 +501,35 @@ class MainWindow(QMainWindow):
             f"Removed folder and {count} sample(s) from catalog"
         )
 
+    @Slot(str)
+    def _on_find_similar(self, file_path: str):
+        """Audio-to-audio similarity: find samples like the selected one."""
+        sample = self.catalog.get_by_path(file_path)
+        if not sample or not sample.get("embedding_id"):
+            self.status.showMessage("Sample has no AI analysis — run Deep Scan first")
+            return
+        eid = sample["embedding_id"]
+        similar = self.vector_store.find_similar_by_id(eid)
+        if not similar:
+            self.status.showMessage("No similar samples found")
+            return
+        fps = [s["file_path"] for s in similar]
+        rows = {r["file_path"]: r for r in self.catalog.get_by_paths(fps)}
+        results = []
+        for s in similar:
+            row = rows.get(s["file_path"])
+            if row:
+                # Attach similarity score for the table/delegate
+                row = dict(row)
+                row["_similarity"] = 1.0 - s["distance"]
+                results.append(row)
+        results = self._apply_scope_filter(results)
+        self.library.load_samples(results)
+        self.search_bar.set_status(f"{len(results)} similar sounds")
+        self.status.showMessage(
+            f"Found {len(results)} similar sounds for '{sample.get('file_name', '')}'"
+        )
+
     # ------------------------------------------------------------------
     # Export
     # ------------------------------------------------------------------
@@ -610,12 +647,6 @@ class MainWindow(QMainWindow):
         self.lbl_count.setText(f"{n:,} samples · {na:,} analysed")
 
     # ------------------------------------------------------------------
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Space:
-            self.player.toggle_play_pause()
-            return
-        super().keyPressEvent(event)
-
     def closeEvent(self, event):
         self._stop_scan()
         self._stop_analysis()

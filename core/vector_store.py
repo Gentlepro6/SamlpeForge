@@ -64,6 +64,16 @@ class VectorStore:
     def find_by_text(self, text_embedding: List[float], n: int = TOP_K_TEXT) -> List[Dict]:
         return self.find_similar(text_embedding, n=n)
 
+    def find_similar_by_id(self, embedding_id: str, n: int = TOP_K_SIMILAR) -> List[Dict]:
+        """Audio-to-audio similarity: find samples like the one with the given ID."""
+        result = self._col.get(ids=[embedding_id], include=["embeddings"])
+        if not result["ids"]:
+            return []
+        emb = result["embeddings"][0]
+        # Request n+1 — the closest result is the sample itself
+        results = self.find_similar(emb, n=n + 1)
+        return [r for r in results if r["id"] != embedding_id][:n]
+
     def count(self) -> int:
         return self._col.count()
 

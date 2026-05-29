@@ -136,6 +136,7 @@ class LibraryView(QWidget):
     sample_selected = Signal(dict)       # full metadata row
     sample_play_requested = Signal(str)  # file_path
     samples_delete_requested = Signal(list)  # list of file_paths
+    sample_find_similar = Signal(str)   # file_path of sample to find similar for
     folder_selected = Signal(str)       # folder path
     folder_remove_requested = Signal(str)  # folder path to remove
 
@@ -375,6 +376,11 @@ class LibraryView(QWidget):
         if not paths:
             return
         menu = QMenu(self)
+        if len(paths) == 1:
+            action = QAction("Find Similar Sounds", self)
+            action.triggered.connect(lambda: self.sample_find_similar.emit(paths[0]))
+            menu.addAction(action)
+            menu.addSeparator()
         action = QAction(f"Remove from Catalog ({len(paths)} selected)", self)
         action.triggered.connect(lambda: self.samples_delete_requested.emit(paths))
         menu.addAction(action)
