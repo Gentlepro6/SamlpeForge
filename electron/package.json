@@ -29,7 +29,8 @@
     "files": [
       "main.js",
       "preload.js",
-      "renderer/**/*"
+      "renderer/**/*",
+      "icon.png"
     ],
     "extraResources": [
       {

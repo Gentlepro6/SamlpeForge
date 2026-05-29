@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'electron/**'
+      - 'assets/**'
       - '**.py'
       - 'requirements.txt'
       - '.github/workflows/build-windows.yml'
@@ -24,21 +25,41 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Download portable Python 3.12.13
+      - name: Copy app icon into electron directory
         run: |
+          Copy-Item -Path assets/icon.png -Destination electron/icon.png -Force
+          Write-Host "Icon copied to electron/icon.png"
+
+      - name: Download portable Python 3.12.13
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
           $url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260510/cpython-3.12.13+20260510-x86_64-pc-windows-msvc-install_only.tar.gz"
-          Write-Host "Downloading portable Python..."
-          Invoke-WebRequest -Uri $url -OutFile python.tar.gz
+          Write-Host "Downloading portable Python from: $url"
+          Invoke-WebRequest -Uri $url -OutFile python.tar.gz -MaximumRetryCount 3 -RetryIntervalSec 5
+          Write-Host "Extracting..."
           tar -xzf python.tar.gz
+          if (-not (Test-Path "python/python.exe")) {
+            Write-Error "python.exe not found after extraction!"
+            exit 1
+          }
           Move-Item -Path python -Destination electron/python
+          Write-Host "Portable Python ready: $(electron/python/python.exe --version)"
 
       - name: Install Python dependencies
+        shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $python = "electron/python/python.exe"
-          Write-Host "Bootstrapping pip..."
-          & $python -m pip install --upgrade pip
+          Write-Host "Upgrading pip..."
+          & $python -m pip install --upgrade pip --quiet
           Write-Host "Installing requirements..."
           & $python -m pip install -r requirements.txt
+          Write-Host "Verifying key packages..."
+          & $python -c "import torch; print(f'torch {torch.__version__}')"
+          & $python -c "import librosa; print(f'librosa {librosa.__version__}')"
+          & $python -c "import chromadb; print('chromadb OK')"
+          & $python -c "from transformers import AutoModel; print('transformers OK')"
 
       - name: Cleanup Python runtime
         run: node electron/cleanup-python.js
@@ -50,6 +71,20 @@ jobs:
       - name: Build NSIS installer
         run: npx electron-builder --win
         working-directory: electron
+
+      - name: Verify built artifact
+        shell: pwsh
+        run: |
+          $unpacked = "electron/dist/win-unpacked/resources"
+          Write-Host "=== Verifying package structure ==="
+          Write-Host "python.exe: $(Test-Path $unpacked/python/python.exe)"
+          Write-Host "main.py:    $(Test-Path $unpacked/main.py)"
+          Write-Host "config.py:  $(Test-Path $unpacked/config.py)"
+          Write-Host "core/:      $(Test-Path $unpacked/core)"
+          Write-Host "ui/:        $(Test-Path $unpacked/ui)"
+          Write-Host "app/:       $(Test-Path $unpacked/app)"
+          if (-not (Test-Path "$unpacked/python/python.exe")) { exit 1 }
+          if (-not (Test-Path "$unpacked/main.py")) { exit 1 }
 
       - name: Upload installer
         uses: actions/upload-artifact@v4

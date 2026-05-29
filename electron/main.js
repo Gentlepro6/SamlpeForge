@@ -45,6 +45,15 @@ function getAppRoot() {
   return process.resourcesPath;
 }
 
+function getIconPath() {
+  const icon = path.join(__dirname, "icon.png");
+  if (fs.existsSync(icon)) return icon;
+  // Fallback for dev when running from electron/ and icon is at ../assets/
+  const fallback = path.join(__dirname, "..", "assets", "icon.png");
+  if (fs.existsSync(fallback)) return fallback;
+  return icon; // return default path even if missing — Electron will use default icon
+}
+
 // ---------------------------------------------------------------------------
 // Python process management
 // ---------------------------------------------------------------------------
@@ -144,6 +153,7 @@ function stopPythonApp() {
 // ---------------------------------------------------------------------------
 
 function createMainWindow() {
+  const iconPath = getIconPath();
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -152,6 +162,7 @@ function createMainWindow() {
     title: "SampleForge",
     backgroundColor: "#141414",
     show: false,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -180,7 +191,7 @@ function createMainWindow() {
 
 function createTray() {
   try {
-    const iconPath = path.join(__dirname, "..", "assets", "tray-icon.png");
+    const iconPath = getIconPath();
     if (fs.existsSync(iconPath)) {
       tray = new Tray(iconPath);
     }
