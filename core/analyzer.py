@@ -120,7 +120,7 @@ def extract_dsp_features(audio: np.ndarray, sr: int) -> Dict:
     return features
 
 
-MIN_DURATION_SEC = 0.5   # descartar samples menores a 0.5s
+MIN_DURATION_SEC = 0.2   # minimum duration for GLAP embedding
 
 
 def analyse_file(file_path: str, model) -> Optional[Dict]:
