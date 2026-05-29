@@ -171,23 +171,17 @@ def get_text_embedding(text: str) -> Optional[List[float]]:
     import torch
     try:
         model = _load_glap()
-        # GLAP expects prompted text and correct NLLB language code
+        # GLAP expects prompted text: "The sound of {label} can be heard."
         prompted = f"The sound of {text} can be heard."
-        lang = _detect_nllb_lang(text)
+        log.info("Encoding text: '%s'", prompted)
         with torch.no_grad():
-            emb = model.encode_text([prompted], source_lang=lang)
-        return emb.squeeze().cpu().numpy().tolist()
+            emb = model.encode_text([prompted])
+        result = emb.squeeze().cpu().numpy().tolist()
+        log.info("Text embedding OK — dim=%d", len(result))
+        return result
     except Exception as exc:
-        log.error("Text embedding failed: %s", exc)
+        log.exception("Text embedding failed")
         return None
-
-
-def _detect_nllb_lang(text: str) -> str:
-    """Heuristic: choose NLLB source_lang code based on character set."""
-    cjk = sum(1 for c in text if "一" <= c <= "鿿" or "㐀" <= c <= "䶿")
-    if cjk > len(text) * 0.3:
-        return "zho_Hans"
-    return "eng_Latn"
 
 
 # ---------------------------------------------------------------------------
