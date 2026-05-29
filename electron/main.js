@@ -124,8 +124,20 @@ function startPythonApp() {
     stdio: ["pipe", "pipe", "pipe"],
   });
 
+  let firstOutput = true;
   pyProcess.stdout.on("data", (data) => {
-    console.log(`[python] ${data.toString().trim()}`);
+    const msg = data.toString().trim();
+    console.log(`[python] ${msg}`);
+    // Hide the launcher window once Python starts producing output.
+    // The PySide6 app creates its own native window.
+    if (firstOutput) {
+      firstOutput = false;
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.hide();
+        }
+      }, 1500); // give Qt window time to appear
+    }
   });
 
   pyProcess.stderr.on("data", (data) => {
